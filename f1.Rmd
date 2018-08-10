@@ -1,0 +1,222 @@
+---
+title: "formula uhn"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(ggplot2)
+library(dplyr)
+library(gridExtra)
+library(ggthemes)
+library(RColorBrewer)
+library(grid)
+library(gridExtra)
+library(ggrepel)
+library(viridis)
+library(circlize)
+
+library(tidyverse)
+
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+results<-read.csv('formula1/results.csv',sep=',',stringsAsFactors=F)
+#convert character to numeric
+results$fastestLapSpeed<-as.numeric(results$fastestLapSpeed)
+#convert FastestLap(character) tonumeric(secondes)
+convertFastestLap<-function(x){
+    if(length(x)>0){
+        curMinute<-as.numeric(strsplit(x,":")[[1]][1])
+        curSecond<-as.numeric(strsplit(strsplit(x,":")[[1]][2],"\\.")[[1]][1])
+        return(curMinute*60 + curSecond)
+        }
+        else if(length(x)==0){
+            return(NA)
+        }
+}
+results$fastestLapTimeNum<-sapply(results$fastestLapTime, convertFastestLap)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+races<-read.csv('formula1/races.csv',stringsAsFactors=F,sep=',')
+#convert character to Date
+races$date<-as.Date(races$date,"%Y-%m-%d")
+#remove "Grand Prix" in the name
+races$name<-gsub(" Grand Prix","",races$name)
+
+results_2<-left_join(
+  results %>% dplyr::select(-time, -fastestLapTime), 
+  races %>% dplyr::select(-time, -url), 
+  by='raceId')
+
+circuits<-read.csv("formula1/circuits.csv",sep=",",stringsAsFactors=F)
+races<-left_join(races %>% select(-name,-url), circuits %>% select(-url), by='circuitId')
+
+
+
+
+
+
+
+```
+
+```{r}
+results_2 %>% 
+  dplyr::filter(year>2004) %>% 
+  dplyr::group_by(name,year) %>% 
+  summarize(medianFastestLapSpeed = median(fastestLapSpeed,na.rm=T)) %>% 
+  ggplot(aes(x=factor(year),y= medianFastestLapSpeed,color=medianFastestLapSpeed)) + 
+  geom_point() + theme_fivethirtyeight() + 
+  scale_color_gradientn(name="",colours=rev(viridis::viridis(20))) +
+  theme(
+    axis.text.x = element_text(size=6,angle=45),
+    strip.text.x = element_text(size = 10)) + facet_wrap(~name,ncol=9) + 
+  labs(title='Fastest Lap per Circuit, from 2005 to 2017',
+       subtitle='speed in km/h') +
+  guides(color=FALSE)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+
+
+```{r}
+drivers<-read.csv('formula1/drivers.csv',sep=',',stringsAsFactors=F)
+#calculate the driver's age in 2017
+drivers$age_driver <- 2017 - sapply(drivers$dob, function(x) as.numeric(strsplit(x,'/')[[1]][3]))
+#load driversStandings
+driversStandings<-read.csv('formula1/driverStandings.csv',sep=',',stringsAsFactors=F)
+drivers<-left_join(drivers %>% select(-url), driversStandings,by='driverId')
+
+#results_3<-
+#  left_join(
+#    results, 
+#    drivers %>% dplyr::rename(number_drivers = number) %>% select(-points, -position, -positionText),
+#    by=c('driverId','raceId')) %>% 
+#  left_join(races %>% select(-time), by='raceId')
+  
+results_3<-left_join(
+    results, 
+    drivers %>% dplyr::rename(number_drivers = number) %>% select(-points, -position, -positionText),
+    by=c('driverId','raceId')) 
+    
+results_3<-left_join(results_3,races %>% select(-time), by='raceId')
+winsDis<-results_3 %>% 
+  filter(position==1) %>% 
+  group_by(driverRef, circuitRef) %>% 
+  summarize(count=n()) %>%
+  mutate(allWins = sum(count)) %>%
+  ggplot(aes(x=allWins)) +
+  geom_histogram(bins=50) + theme_fivethirtyeight() + ggtitle("Distribution of the number of victories")
+
+winsBar<-results_3 %>% 
+  dplyr::filter(position==1) %>% 
+  dplyr::group_by(driverRef, circuitRef) %>% 
+  dplyr::summarize(count=n()) %>%
+  dplyr::mutate(allWins = sum(count)) %>% 
+  dplyr::filter(allWins>2) %>%
+  ggplot(aes(x=reorder(driverRef, allWins),y= count)) +
+  geom_bar(aes(fill=circuitRef),stat='identity',color='white',size=.1) + 
+  coord_flip() + theme_fivethirtyeight() + 
+  scale_fill_manual(name="",values = viridis::viridis(71)) +
+  guides(fill=guide_legend(ncol=5)) + 
+  theme(legend.text= element_text(size=10),
+        legend.key.size = unit(.1, "cm"),
+        legend.position=c(.65,.20)) + 
+  labs(title="Number of victories per Driver",
+       subtitle="only drivers with 2 or more wins are shown.")
+winsBar + annotation_custom(grob = ggplotGrob(winsDis), xmin = 22, xmax = 50, ymin = 31, ymax = 90)
+```
+
+
+
+```{r}
+constructors<-read.csv('formula1/constructors.csv',sep=',',stringsAsFactors=F)
+constructorStandings<-read.csv('formula1/constructorStandings.csv',sep=',',stringsAsFactors=F)
+constructorResults<-read.csv("formula1/constructorResults.csv",sep=",",stringsAsFactors=F)
+
+constructorResults<-left_join(
+  constructorResults, 
+  races %>% rename(name_races = name), by='raceId')
+
+constructorResults <- left_join(constructorResults, constructors %>% select(-url) %>% rename(name_constructor = name), by='constructorId')
+
+constructorResults <- left_join(constructorResults, constructorStandings %>% rename(point_constructor = points) %>% select(-X), by=c('constructorId','raceId'))
+winConstructors<-constructorResults %>% 
+  filter(wins == 1) %>% 
+  group_by(name_constructor) %>% 
+  summarize(count=n()) %>% 
+  filter(count>0) %>%
+  ggplot(aes(x=reorder(name_constructor, count),y= count,fill=count)) +
+  geom_bar(stat='identity',color='white',size=.1) + 
+  coord_flip() + theme_fivethirtyeight() + 
+  scale_fill_gradientn(name="",colors = viridis::viridis(10)) +
+  guides(fill=guide_legend(ncol=3)) + 
+  theme(legend.text= element_text(size=10),
+        legend.key.size = unit(.1, "cm"),
+        legend.position=c(.65,.20)) + 
+  labs(title="Number of victories per Constructor",
+       subtitle="only Constructor with 1 or more wins are shown.") + guides(fill=F)
+       
+top5Constructors<-constructorResults %>% 
+  filter(name_constructor %in% c('Ferrari','McLaren','Williams','Brabham','BRM')) %>% 
+  filter(wins == 1) %>% group_by(name_constructor,year) %>%
+  summarize(count=n()) %>% 
+  ggplot(aes(x=factor(year),y=count)) +
+  geom_histogram(aes(fill=name_constructor),
+                 stat='identity',
+                 position="fill",
+                 size=1.5) + 
+  theme_fivethirtyeight() + scale_fill_brewer(name="",palette='Paired') +
+  theme(axis.text.x = element_text(size=8,angle=45)) + ggtitle("Top 5 constructors's wins per year")
+winConstructors + 
+annotation_custom(grob = ggplotGrob(top5Constructors), xmin = 20, xmax = 0, ymin = 20, ymax = 200)
+
+```
+```{r}
+pitStops <-read.csv('formula1/pitStops.csv',sep=',',stringsAsFactors=F)
+
+
+pits_2<-left_join(
+  pitStops %>% dplyr::select(-time), 
+  races %>% dplyr::select(-time), 
+  by='raceId')
+
+head(pits_2)
+
+head(pitStops)
+
+pitStops %>% group_by(stop) %>%
+  summarize(mean(lap))
+
+pitStops %>% group_by(stop) %>%
+  summarize(mean(milliseconds/1000))
+
+
+pitStops %>% 
+  summarize(median(stop))
+
+
+pits_2 %>% group_by(year) %>%
+  summarize(mean(milliseconds/1000
+              ))
+
+
+pits_2 %>% filter(year==2016, milliseconds>2000000
+                  )
+
+
+```
+
